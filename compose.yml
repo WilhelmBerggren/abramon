@@ -1,0 +1,78 @@
+version: "3.8"
+
+services:
+  app:
+    image: python:3.12-alpine
+    command: python3 /healthcheck.py
+    environment:
+      - LABEL
+      - ALERT_TO
+      - ALERT_FROM
+      - POSTAL_URL
+      - DISK_PCT
+      - INODE_PCT
+      - MEM_PCT
+      - SWAP_PCT
+      - LOAD_PER_CORE
+      - COOLDOWN_HOURS
+      - MOUNTS
+      - DOCKER_HOST
+      - HOST_PREFIX=/host
+    configs:
+      - source: healthcheck
+        target: /healthcheck.py
+        mode: 0555
+    secrets:
+      - postal_api_key
+    volumes:
+      # Read-only view of the host so disk/inode checks see the node, not the container.
+      - "/:/host:ro"
+      # Persists the debounce state between runs.
+      - "state:/var/lib/vps-healthcheck"
+    deploy:
+      # swarm-cronjob scales this to 1 on schedule, the script runs once, then it
+      # scales back to 0. restart_policy "none" keeps it from looping.
+      mode: replicated
+      replicas: 0
+      restart_policy:
+        condition: none
+      placement:
+        constraints:
+          - "node.role == manager"
+      labels:
+        - "swarm.cronjob.enable=true"
+        - "swarm.cronjob.schedule=${CRON_SCHEDULE}"
+        - "coop-cloud.${STACK_NAME}.app=true"
+
+  # Minimal, read-only Docker API for the Swarm/health checks. Same pattern
+  # Traefik and backup-bot-two use. Stays running; only POST is denied.
+  socket-proxy:
+    image: lscr.io/linuxserver/socket-proxy:3.2.10
+    environment:
+      - CONTAINERS=1
+      - SERVICES=1
+      - TASKS=1
+      - NODES=1
+      - POST=0
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    read_only: true
+    tmpfs:
+      - /run
+    deploy:
+      placement:
+        constraints:
+          - "node.role == manager"
+
+configs:
+  healthcheck:
+    name: ${STACK_NAME}_healthcheck_${HEALTHCHECK_VERSION}
+    file: healthcheck.py
+
+secrets:
+  postal_api_key:
+    external: true
+    name: ${STACK_NAME}_postal_api_key_${SECRET_POSTAL_API_KEY_VERSION}
+
+volumes:
+  state:

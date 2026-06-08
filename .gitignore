@@ -1,0 +1,7 @@
+# abra writes the live, secret-bearing env file next to the recipe; never commit it.
+.env
+.envrc
+
+# Python
+__pycache__/
+*.pyc
